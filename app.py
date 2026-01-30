@@ -5,11 +5,7 @@ import plotly.express as px
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(
-    page_title="Dashboard Kepatuhan LHKPN",
-    layout="wide"
-)
-
+st.set_page_config(page_title="Dashboard Kepatuhan LHKPN", layout="wide")
 st.title("📊 Dashboard Kepatuhan Pelaporan LHKPN")
 st.caption("Periode Januari – Maret 2026")
 
@@ -25,6 +21,22 @@ def normalisasi_kolom(df):
     )
     return df
 
+def auto_mapping_kolom(df):
+    mapping = {}
+
+    for col in df.columns:
+        if col in ["NAMA", "NAMA_WL", "NAMA PEJABAT", "NAMA LENGKAP"]:
+            mapping[col] = "NAMA"
+        elif col in ["SUB UNIT KERJA", "SUB_UNIT_KERJA"]:
+            mapping[col] = "SUB UNIT KERJA"
+        elif col in ["UNIT KERJA", "UNIT_KERJA"]:
+            mapping[col] = "UNIT KERJA"
+        elif col == "NIK":
+            mapping[col] = "NIK"
+
+    df = df.rename(columns=mapping)
+    return df
+
 def status_lhkpn(row):
     if row["JAN"] == 1:
         return "🟢 Hijau", 100
@@ -36,9 +48,9 @@ def status_lhkpn(row):
         return "⚫ Hitam", 0
 
 # =========================
-# SIDEBAR - UPLOAD
+# SIDEBAR UPLOAD
 # =========================
-st.sidebar.header("📁 Upload Data LHKPN")
+st.sidebar.header("📁 Upload File LHKPN")
 
 file_jan = st.sidebar.file_uploader("File Januari", type=["xlsx"])
 file_feb = st.sidebar.file_uploader("File Februari", type=["xlsx"])
@@ -49,16 +61,16 @@ if not (file_jan and file_feb and file_mar):
     st.stop()
 
 # =========================
-# LOAD & NORMALISASI DATA
+# LOAD DATA
 # =========================
-df_jan = normalisasi_kolom(pd.read_excel(file_jan))
-df_feb = normalisasi_kolom(pd.read_excel(file_feb))
-df_mar = normalisasi_kolom(pd.read_excel(file_mar))
+df_jan = auto_mapping_kolom(normalisasi_kolom(pd.read_excel(file_jan)))
+df_feb = auto_mapping_kolom(normalisasi_kolom(pd.read_excel(file_feb)))
+df_mar = auto_mapping_kolom(normalisasi_kolom(pd.read_excel(file_mar)))
 
 # =========================
-# DEBUG KOLOM (AMAN DIHAPUS NANTI)
+# DEBUG KOLOM (HAPUS NANTI)
 # =========================
-st.sidebar.write("Kolom File:", df_jan.columns.tolist())
+st.sidebar.write("Kolom setelah mapping:", df_jan.columns.tolist())
 
 # =========================
 # PENANDA BULAN
@@ -68,22 +80,17 @@ df_feb["FEB"] = 1
 df_mar["MAR"] = 1
 
 # =========================
-# KOLOM KUNCI (SESUAI FILE LHKPN)
+# KOLOM STANDAR INTERNAL
 # =========================
-kolom_kunci = [
-    "NIK",
-    "NAMA_WL",
-    "SUB UNIT KERJA",
-    "UNIT KERJA"
-]
+kolom_kunci = ["NIK", "NAMA", "SUB UNIT KERJA", "UNIT KERJA"]
 
 # =========================
 # VALIDASI KOLOM WAJIB
 # =========================
-for kolom in kolom_kunci:
-    if kolom not in df_jan.columns:
-        st.error(f"Kolom '{kolom}' tidak ditemukan di file")
-        st.stop()
+missing = [c for c in kolom_kunci if c not in df_jan.columns]
+if missing:
+    st.error(f"Kolom wajib tidak ditemukan: {missing}")
+    st.stop()
 
 # =========================
 # MERGE DATA
@@ -126,12 +133,13 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total Wajib Lapor", total)
 col2.metric("🟢 Hijau", hijau)
 col3.metric("⚫ Belum Lapor", hitam)
-
-kepatuhan = round(((total - hitam) / total) * 100, 2) if total else 0
-col4.metric("Tingkat Kepatuhan", f"{kepatuhan} %")
+col4.metric(
+    "Tingkat Kepatuhan",
+    f"{round(((total - hitam) / total) * 100, 2) if total else 0} %"
+)
 
 # =========================
-# GRAFIK STATUS
+# GRAFIK
 # =========================
 fig = px.pie(
     df,
@@ -144,24 +152,18 @@ st.plotly_chart(fig, use_container_width=True)
 # =========================
 # RANKING SUB UNIT
 # =========================
-ranking_subunit = (
-    df.groupby("SUB UNIT KERJA", dropna=False)
-    .agg(
-        Total_WL=("NIK", "count"),
-        Skor_Rata=("SKOR", "mean")
-    )
+ranking = (
+    df.groupby("SUB UNIT KERJA")
+    .agg(Total_WL=("NIK", "count"), Skor_Rata=("SKOR", "mean"))
     .sort_values("Skor_Rata", ascending=False)
     .reset_index()
 )
 
 st.subheader("🏆 Ranking Sub Unit Kerja")
-st.dataframe(ranking_subunit, use_container_width=True)
+st.dataframe(ranking, use_container_width=True)
 
 # =========================
-# DATA DETAIL INDIVIDU
+# DATA DETAIL
 # =========================
-st.subheader("📋 Data Individu Wajib Lapor")
-st.dataframe(
-    df.sort_values("SKOR", ascending=False),
-    use_container_width=True
-)
+st.subheader("📋 Data Individu")
+st.dataframe(df.sort_values("SKOR", ascending=False), use_container_width=True)
