@@ -4,78 +4,102 @@ import plotly.express as px
 
 st.set_page_config(layout="wide", page_title="DSS Kepatuhan LHKPN")
 
-st.title("📊 Dashboard Kepatuhan LHKPN 2026")
-st.subheader("Periode Pelaporan: Januari - Maret")
+# Styling CSS untuk tampilan warna status
+st.markdown("""
+    <style>
+    .status-box { padding: 10px; border-radius: 5px; color: white; text-align: center; font-weight: bold; }
+    .hijau { background-color: #28a745; }
+    .kuning { background-color: #ffc107; color: black; }
+    .merah { background-color: #dc3545; }
+    .hitam { background-color: #000000; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- SIDEBAR: UPLOAD FILE ---
-st.sidebar.header("Upload Sumber Data")
-file_jan = st.sidebar.file_uploader("Upload Data Januari", type=['csv', 'xlsx'])
-file_feb = st.sidebar.file_uploader("Upload Data Februari", type=['csv', 'xlsx'])
-file_mar = st.sidebar.file_uploader("Upload Data Maret", type=['csv', 'xlsx'])
-file_master = st.sidebar.file_uploader("Upload Master Pegawai (Wajib Lapor)", type=['csv', 'xlsx'])
+st.title("📊 Dashboard DSS Kepatuhan LHKPN 2026")
+st.info("Sistem akan membandingkan data Januari - Maret untuk menentukan kategori kepatuhan.")
 
-if file_master and file_jan:
-    # Load Data
-    df_master = pd.read_excel(file_master) # Asumsi file excel
+# --- SIDEBAR UPLOAD ---
+st.sidebar.header("Upload Data Bulanan")
+file_jan = st.sidebar.file_uploader("1. File Januari (Basis Data)", type=['xlsx', 'csv'])
+file_feb = st.sidebar.file_uploader("2. File Februari", type=['xlsx', 'csv'])
+file_mar = st.sidebar.file_uploader("3. File Maret", type=['xlsx', 'csv'])
+
+if file_jan:
+    # Membaca data
     df_jan = pd.read_excel(file_jan)
-    df_feb = pd.read_excel(file_feb) if file_feb else pd.DataFrame()
-    df_mar = pd.read_excel(file_mar) if file_mar else pd.DataFrame()
-
-    # --- LOGIKA KATEGORISASI ---
-    def check_status(row):
-        nik = row['NIK']
-        if nik in df_jan['NIK'].values:
-            return 'HIJAU (Januari)'
-        elif not df_feb.empty and nik in df_feb['NIK'].values:
-            return 'KUNING (Februari)'
-        elif not df_mar.empty and nik in df_mar['NIK'].values:
-            return 'MERAH (Maret)'
-        else:
-            return 'HITAM (Belum Lapor)'
-
-    df_master['Status Kepatuhan'] = df_master.apply(check_status, axis=1)
-
-    # --- BAGIAN 1: GLOBAL KPI ---
-    col1, col2, col3, col4 = st.columns(4)
-    total = len(df_master)
-    hijau = len(df_master[df_master['Status Kepatuhan'] == 'HIJAU (Januari)'])
-    kuning = len(df_master[df_master['Status Kepatuhan'] == 'KUNING (Februari)'])
-    hitam = len(df_master[df_master['Status Kepatuhan'] == 'HITAM (Belum Lapor)'])
-
-    col1.metric("Total Wajib Lapor", total)
-    col2.metric("Patuh Awal (Hijau)", hijau)
-    col3.metric("Patuh (Kuning)", kuning)
-    col4.error(f"Belum Lapor: {hitam}")
-
-    # --- BAGIAN 2: RANKING SUB-UNIT ---
-    st.write("### 🏆 Ranking Kepatuhan per Sub-Unit Kerja")
+    # Gunakan NIK atau Nama sebagai Key (Sesuaikan dengan nama kolom di file Anda)
+    key_col = 'NIK' 
+    status_col = 'STATUS_LHKPN' # Contoh nama kolom status di file Anda
     
-    # Hitung persentase patuh per sub-unit
-    ranking_dept = df_master.groupby('Sub Unit Kerja').apply(
-        lambda x: (x['Status Kepatuhan'] != 'HITAM (Belum Lapor)').sum() / len(x) * 100
-    ).reset_index(name='Persentase Kepatuhan')
+    # Inisialisasi DataFrame Utama dari file Januari
+    df_final = df_jan.copy()
     
-    ranking_dept = ranking_dept.sort_values(by='Persentase Kepatuhan', ascending=False)
-    
-    fig_rank = px.bar(ranking_dept, x='Persentase Kepatuhan', y='Sub Unit Kerja', orientation='h',
-                 color='Persentase Kepatuhan', color_continuous_scale='RdYlGn')
-    st.plotly_chart(fig_rank, use_container_width=True)
+    # Fungsi Logika Warna
+    def assign_color(row):
+        # 1. Cek Januari
+        if row[status_col].lower() == 'sudah lapor':
+            return 'HIJAU'
+        
+        # 2. Cek Februari (Jika file diupload)
+        if file_feb:
+            df_feb = pd.read_excel(file_feb)
+            status_feb = df_feb.loc[df_feb[key_col] == row[key_col], status_col].values
+            if len(status_feb) > 0 and status_feb[0].lower() == 'sudah lapor':
+                return 'KUNING'
+        
+        # 3. Cek Maret (Jika file diupload)
+        if file_mar:
+            df_mar = pd.read_excel(file_mar)
+            status_mar = df_mar.loc[df_mar[key_col] == row[key_col], status_col].values
+            if len(status_mar) > 0 and status_mar[0].lower() == 'sudah lapor':
+                return 'MERAH'
+        
+        return 'HITAM'
 
-    # --- BAGIAN 3: DETAIL DATA INDIVIDU ---
-    st.write("### 🔍 Detail Status Individu")
-    search = st.text_input("Cari Nama atau NIK")
-    if search:
-        df_master = df_master[df_master['Nama'].str.contains(search, case=False)]
+    # Eksekusi Kategorisasi
+    if st.sidebar.button("Proses Data"):
+        df_final['Kategori'] = df_final.apply(assign_color, axis=1)
+        
+        # --- RINGKASAN ATAS ---
+        cols = st.columns(4)
+        counts = df_final['Kategori'].value_counts()
+        
+        cols[0].metric("Sangat Patuh (Jan)", counts.get('HIJAU', 0))
+        cols[1].metric("Patuh (Feb)", counts.get('KUNING', 0))
+        cols[2].metric("Last Minute (Mar)", counts.get('MERAH', 0))
+        cols[3].metric("BELUM LAPOR", counts.get('HITAM', 0), delta_color="inverse")
 
-    # Memberi warna pada tabel
-    def color_status(val):
-        if 'HIJAU' in val: color = '#28a745'
-        elif 'KUNING' in val: color = '#ffc107'
-        elif 'MERAH' in val: color = '#dc3545'
-        else: color = '#000000; color: white'
-        return f'background-color: {color}'
+        # --- RANKING PER SUB-UNIT ---
+        st.divider()
+        st.subheader("🏆 Ranking Kepatuhan per Sub-Unit Kerja")
+        
+        # Hitung Persentase Kepatuhan (Hijau+Kuning+Merah) / Total
+        df_rank = df_final.groupby('SUB_UNIT').apply(
+            lambda x: (x['Kategori'] != 'HITAM').sum() / len(x) * 100
+        ).reset_index(name='Persentase')
+        df_rank = df_rank.sort_values('Persentase', ascending=False)
+        
+        fig = px.bar(df_rank, x='Persentase', y='SUB_UNIT', orientation='h', 
+                     color='Persentase', color_continuous_scale='RdYlGn',
+                     title="Sub-Unit Paling Patuh")
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.dataframe(df_master.style.applymap(color_status, subset=['Status Kepatuhan']), use_container_width=True)
+        # --- TABEL DETAIL ---
+        st.subheader("🔍 Detail Data Individu")
+        
+        # Pewarnaan Tabel
+        def color_row(val):
+            color = ''
+            if val == 'HIJAU': color = 'background-color: #28a745; color: white'
+            elif val == 'KUNING': color = 'background-color: #ffc107; color: black'
+            elif val == 'MERAH': color = 'background-color: #dc3545; color: white'
+            elif val == 'HITAM': color = 'background-color: #000000; color: white'
+            return color
 
+        st.dataframe(df_final.style.applymap(color_row, subset=['Kategori']), use_container_width=True)
+        
+        # Fitur Download Laporan Hasil Olahan
+        csv = df_final.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Laporan Hasil Ranking (CSV)", csv, "Laporan_Kepatuhan.csv", "text/csv")
 else:
-    st.info("Silakan upload minimal File Master Pegawai dan File Januari untuk memulai.")
+    st.warning("Silakan unggah file Januari sebagai basis data utama.")
